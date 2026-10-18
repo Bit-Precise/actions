@@ -1,0 +1,99 @@
+name: Sign and notarize macOS release artifacts
+
+on:
+  workflow_call:
+    inputs:
+      artifact-name:
+        description: Current-run artifact containing flat Mach-O CLI files or flat PKGs
+        required: true
+        type: string
+      stage:
+        description: cli or pkg; app bundles and Electron signing are not supported
+        required: true
+        type: string
+      signed-artifact-name:
+        description: Output name; defaults to artifact-name plus -signed
+        required: false
+        default: ''
+        type: string
+    secrets:
+      APPLE_APPLICATION_P12_BASE64:
+        required: false
+      APPLE_APPLICATION_P12_PASSWORD:
+        required: false
+      APPLE_INSTALLER_P12_BASE64:
+        required: false
+      APPLE_INSTALLER_P12_PASSWORD:
+        required: false
+      APPLE_NOTARY_KEY_P8_BASE64:
+        required: true
+    outputs:
+      signed-artifact-name:
+        description: Uploaded artifact containing signed/notarized files and SHA256SUMS
+        value: ${{ jobs.sign.outputs.signed-artifact-name }}
+      signed-artifact-id:
+        description: GitHub artifact ID in the caller workflow run
+        value: ${{ jobs.sign.outputs.signed-artifact-id }}
+
+permissions:
+  contents: read
+
+jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      signed-artifact-name: ${{ steps.authorize.outputs.signed-artifact-name }}
+    steps:
+      - uses: Bit-Precise/actions/actions/authorize@v1
+        id: authorize
+        with:
+          platform: macos
+          stage: ${{ inputs.stage }}
+          artifact-name: ${{ inputs.artifact-name }}
+          signed-artifact-name: ${{ inputs.signed-artifact-name }}
+
+  sign:
+    needs: authorize
+    if: >-
+      ${{ github.repository_owner_id == '295183371' &&
+          ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+           (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')) }}
+    runs-on: macos-15
+    timeout-minutes: 90
+    permissions: {contents: read}
+    outputs:
+      signed-artifact-name: ${{ needs.authorize.outputs.signed-artifact-name }}
+      signed-artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ${{ runner.temp }}/signing-input
+          digest-mismatch: error
+      - name: Developer ID sign and notarize selected stage
+        uses: Bit-Precise/actions/actions/macos-artifacts@v1
+        env:
+          APPLE_APPLICATION_IDENTITY: ${{ vars.APPLE_APPLICATION_IDENTITY }}
+          APPLE_INSTALLER_IDENTITY: ${{ vars.APPLE_INSTALLER_IDENTITY }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          APPLE_NOTARY_KEY_ID: ${{ vars.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ vars.APPLE_NOTARY_ISSUER_ID }}
+          APPLE_APPLICATION_P12_BASE64: ${{ inputs.stage == 'cli' && secrets.APPLE_APPLICATION_P12_BASE64 || '' }}
+          APPLE_APPLICATION_P12_PASSWORD: ${{ inputs.stage == 'cli' && secrets.APPLE_APPLICATION_P12_PASSWORD || '' }}
+          APPLE_INSTALLER_P12_BASE64: ${{ inputs.stage == 'pkg' && secrets.APPLE_INSTALLER_P12_BASE64 || '' }}
+          APPLE_INSTALLER_P12_PASSWORD: ${{ inputs.stage == 'pkg' && secrets.APPLE_INSTALLER_P12_PASSWORD || '' }}
+          APPLE_NOTARY_KEY_P8_BASE64: ${{ secrets.APPLE_NOTARY_KEY_P8_BASE64 }}
+        with:
+          stage: ${{ inputs.stage }}
+          input-directory: ${{ runner.temp }}/signing-input
+          output-directory: ${{ runner.temp }}/signing-output
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        id: upload
+        with:
+          name: ${{ needs.authorize.outputs.signed-artifact-name }}
+          path: ${{ runner.temp }}/signing-output/*
+          include-hidden-files: false
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14

@@ -1,0 +1,22 @@
+name: Sign and notarize macOS CLI or PKG artifacts
+description: Sign flat Mach-O CLI files or installer PKGs; does not support app bundle signing
+inputs:
+  stage:
+    description: cli or pkg
+    required: true
+  input-directory:
+    description: Downloaded artifact directory
+    required: true
+  output-directory:
+    description: Separate signing output directory
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        SIGN_STAGE: ${{ inputs.stage }}
+        SIGN_INPUT: ${{ inputs.input-directory }}
+        SIGN_OUTPUT: ${{ inputs.output-directory }}
+        SIGN_SCRIPT: ${{ github.action_path }}/../../scripts/macos-artifacts.py
+      run: python3 "$SIGN_SCRIPT" --stage "$SIGN_STAGE" --input-directory "$SIGN_INPUT" --output-directory "$SIGN_OUTPUT"

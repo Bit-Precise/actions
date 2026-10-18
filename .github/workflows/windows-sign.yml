@@ -1,0 +1,123 @@
+name: Sign Windows release artifacts
+
+on:
+  workflow_call:
+    inputs:
+      artifact-name:
+        description: Current-run artifact containing only flat EXEs or only flat MSIs
+        required: true
+        type: string
+      stage:
+        description: exe or msi; build the MSI from signed EXEs before calling the msi stage
+        required: true
+        type: string
+      signed-artifact-name:
+        description: Output name; defaults to artifact-name plus -signed
+        required: false
+        default: ''
+        type: string
+    outputs:
+      signed-artifact-name:
+        description: Uploaded artifact containing verified signatures and SHA256SUMS
+        value: ${{ jobs.sign.outputs.signed-artifact-name }}
+      signed-artifact-id:
+        description: GitHub artifact ID in the caller workflow run
+        value: ${{ jobs.sign.outputs.signed-artifact-id }}
+
+permissions:
+  contents: read
+
+jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      signed-artifact-name: ${{ steps.authorize.outputs.signed-artifact-name }}
+    steps:
+      # Shared private actions are downloaded with GitHub's scoped action token;
+      # do not checkout the caller's source or require a cross-repository PAT.
+      - uses: Bit-Precise/actions/actions/authorize@v1
+        id: authorize
+        with:
+          platform: windows
+          stage: ${{ inputs.stage }}
+          artifact-name: ${{ inputs.artifact-name }}
+          signed-artifact-name: ${{ inputs.signed-artifact-name }}
+
+  sign:
+    needs: authorize
+    if: >-
+      ${{ github.repository_owner_id == '295183371' &&
+          ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+           (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')) }}
+    runs-on: windows-latest
+    timeout-minutes: 40
+    permissions: {contents: read, id-token: write}
+    outputs:
+      signed-artifact-name: ${{ needs.authorize.outputs.signed-artifact-name }}
+      signed-artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ${{ runner.temp }}/signing-input
+          digest-mismatch: error
+      - name: Validate and stage inputs without executing them
+        uses: Bit-Precise/actions/actions/windows-artifacts@v1
+        with:
+          phase: Prepare
+          stage: ${{ inputs.stage }}
+          input-directory: ${{ runner.temp }}/signing-input
+          output-directory: ${{ runner.temp }}/signing-output
+      - name: Require organization signing variables
+        shell: pwsh
+        env:
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          AZURE_SIGNING_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          AZURE_SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          AZURE_SIGNING_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
+        run: |
+          foreach ($name in @('AZURE_CLIENT_ID', 'AZURE_TENANT_ID', 'AZURE_SUBSCRIPTION_ID', 'AZURE_SIGNING_ENDPOINT', 'AZURE_SIGNING_ACCOUNT', 'AZURE_SIGNING_PROFILE')) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) { throw "Missing signing variable $name" }
+          }
+          if ($env:AZURE_SIGNING_ENDPOINT -cnotmatch '^https://[a-z0-9]+\.codesigning\.azure\.net/$') { throw 'Expected the Azure account regional HTTPS endpoint' }
+      - name: Authenticate this reusable signing workflow to Azure
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Sign selected stage using Azure Artifact Signing
+        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
+        with:
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
+          files-folder: ${{ runner.temp }}/signing-output
+          files-folder-filter: ${{ inputs.stage }}
+          files-folder-recurse: false
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          exclude-environment-credential: true
+          exclude-azure-cli-credential: false
+          cache-dependencies: false
+          trace: false
+      - name: Verify Authenticode and timestamp before checksums
+        uses: Bit-Precise/actions/actions/windows-artifacts@v1
+        with:
+          phase: Verify
+          stage: ${{ inputs.stage }}
+          input-directory: ${{ runner.temp }}/signing-input
+          output-directory: ${{ runner.temp }}/signing-output
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        id: upload
+        with:
+          name: ${{ needs.authorize.outputs.signed-artifact-name }}
+          path: ${{ runner.temp }}/signing-output/*
+          include-hidden-files: false
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14

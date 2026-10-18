@@ -1,0 +1,28 @@
+name: Prepare or verify Windows signing artifacts
+description: Validate flat EXE/MSI inputs or verify signatures/timestamps and produce final checksums
+inputs:
+  phase:
+    description: Prepare or Verify
+    required: true
+  stage:
+    description: exe or msi
+    required: true
+  input-directory:
+    description: Downloaded artifact directory
+    required: true
+  output-directory:
+    description: Separate signing output directory
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: pwsh
+      env:
+        SIGN_PHASE: ${{ inputs.phase }}
+        SIGN_STAGE: ${{ inputs.stage }}
+        SIGN_INPUT: ${{ inputs.input-directory }}
+        SIGN_OUTPUT: ${{ inputs.output-directory }}
+        SIGN_SCRIPT: ${{ github.action_path }}/../../scripts/windows-artifacts.ps1
+      run: |
+        & $env:SIGN_SCRIPT -Phase $env:SIGN_PHASE -Stage $env:SIGN_STAGE -InputDirectory $env:SIGN_INPUT -OutputDirectory $env:SIGN_OUTPUT
+        if ($LASTEXITCODE -ne 0) { throw 'Windows signing artifact validation failed' }

@@ -1,0 +1,35 @@
+name: Authorize signing request
+description: Check organization ID, trigger, stage and artifact names without signing credentials
+inputs:
+  platform:
+    description: windows or macos
+    required: true
+  stage:
+    description: exe/msi for Windows, cli/pkg for macOS
+    required: true
+  artifact-name:
+    description: Input artifact in the current caller workflow run
+    required: true
+  signed-artifact-name:
+    description: Output artifact name; defaults to input name with -signed
+    required: false
+    default: ''
+outputs:
+  signed-artifact-name:
+    description: Validated output artifact name
+    value: ${{ steps.authorize.outputs.signed-artifact-name }}
+runs:
+  using: composite
+  steps:
+    - id: authorize
+      shell: bash
+      env:
+        CALLER_OWNER_ID: ${{ github.repository_owner_id }}
+        CALLER_EVENT: ${{ github.event_name }}
+        CALLER_REF: ${{ github.ref }}
+        SIGN_PLATFORM: ${{ inputs.platform }}
+        SIGN_STAGE: ${{ inputs.stage }}
+        INPUT_ARTIFACT: ${{ inputs.artifact-name }}
+        OUTPUT_ARTIFACT: ${{ inputs.signed-artifact-name }}
+        AUTHORIZE_SCRIPT: ${{ github.action_path }}/../../scripts/authorize.py
+      run: python3 "$AUTHORIZE_SCRIPT"
