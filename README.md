@@ -6,10 +6,10 @@ compile, run installers, execute input programs, or publish releases.
 
 | Workflow at `@v1` | `stage` | Flat artifact contents |
 |---|---|---|
-| `.github/workflows/windows-sign.yml` | `exe` | `.exe` files |
-| `.github/workflows/windows-sign.yml` | `msi` | `.msi` files |
-| `.github/workflows/macos-sign.yml` | `cli` | Mach-O CLI executables, including amd64/arm64/universal |
-| `.github/workflows/macos-sign.yml` | `pkg` | flat `.pkg` installers |
+| `.github/workflows/sign-windows.yml` | `exe` | `.exe` files |
+| `.github/workflows/sign-windows.yml` | `msi` | `.msi` files |
+| `.github/workflows/sign-macos.yml` | `cli` | Mach-O CLI executables, including amd64/arm64/universal |
+| `.github/workflows/sign-macos.yml` | `pkg` | flat `.pkg` installers |
 
 Required inputs are `artifact-name` and `stage`. Optional
 `signed-artifact-name` defaults to `<artifact-name>-signed`. Outputs are
@@ -36,7 +36,7 @@ The Azure exact subject for the intended organization custom template
 `[repository_owner_id, job_workflow_ref]` is:
 
 ```text
-repository_owner_id:295183371:job_workflow_ref:Bit-Precise/actions/.github/workflows/windows-sign.yml@refs/tags/v1
+repository_owner_id:295183371:job_workflow_ref:Bit-Precise/actions/.github/workflows/sign-windows.yml@refs/tags/v1
 ```
 
 Both reusable workflows and their supporting composite actions use this
